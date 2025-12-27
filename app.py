@@ -6,7 +6,7 @@ from PIL import Image
 from huggingface_hub import InferenceClient
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="AI Video Pro", page_icon="🎬", layout="centered")
+st.set_page_config(page_title="AI Video Zeroscope", page_icon="🎬", layout="centered")
 
 # --- CSS STYLING ---
 st.markdown("""
@@ -20,78 +20,77 @@ st.markdown("""
 # --- SETUP CLIENT ---
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-# Models IDs
-MODEL_TEXT = "damo-vilab/text-to-video-ms-1.7b"
+# ✅ NEW MODEL: Zeroscope (Faster & Lighter for Free Tier)
+MODEL_TEXT = "cerspense/zeroscope_v2_576w"
 MODEL_IMAGE = "stabilityai/stable-video-diffusion-img2vid-xt"
 
-# Initialize Client (Yeh automatic connection sambhalega)
 client = InferenceClient(token=HF_TOKEN)
 
 def generate_video(model_id, inputs, is_binary=False):
-    # Retry Logic (3 times)
+    # Retry Logic
     for attempt in range(3):
         try:
             if is_binary:
-                # Image-to-Video
                 response = client.post(model_id, data=inputs)
             else:
-                # Text-to-Video
                 response = client.post(model_id, json={"inputs": inputs})
-            
             return response
             
         except Exception as e:
             error_msg = str(e)
             
-            # Agar Model Load ho raha hai (503)
+            # Agar Cold Start hai (Loading)
             if "503" in error_msg or "loading" in error_msg.lower():
-                st.warning(f"⚠️ Model load ho raha hai (Cold Start)... {20}s wait. (Try {attempt+1}/3)")
-                time.sleep(20)
+                wait_time = 25
+                st.warning(f"⚠️ Server Jaag raha hai (Warming up)... {wait_time}s wait. (Try {attempt+1}/3)")
+                time.sleep(wait_time)
                 continue
             
-            # Agar koi aur error hai
-            elif "404" in error_msg:
-                st.error("❌ Error 404: Model temporarily down or moved by Hugging Face.")
-                return None
-            else:
-                # Chhota error dikhayenge, technical detail chhupa denge
-                st.warning(f"🔄 Server busy, retrying... ({attempt+1}/3)")
-                time.sleep(5)
+            # 🚨 REAL ERROR DIKHAYENGE (Debugging ke liye)
+            st.error(f"🚫 Attempt {attempt+1} Failed. Reason: {error_msg}")
+            
+            # Thoda ruk kar retry
+            time.sleep(5)
     
-    st.error("❌ Server abhi response nahi de raha. Please 5 minute baad try karein.")
     return None
 
 def main():
-    st.title("🎬 AI Video Generator (Official API)")
+    st.title("🎬 AI Video Generator (Zeroscope Edition)")
     
     if not HF_TOKEN:
-        st.error("🚨 HF_TOKEN environment variable missing hai!")
+        st.error("🚨 Token Missing! Koyeb settings check karein.")
         return
 
-    tab1, tab2 = st.tabs(["📝 Text-to-Video", "🖼️ Image-to-Video"])
+    tab1, tab2 = st.tabs(["📝 Text-to-Video (Fast)", "🖼️ Image-to-Video (Heavy)"])
 
-    # --- TAB 1: TEXT ---
+    # --- TAB 1: ZEROSCOPE TEXT ---
     with tab1:
-        prompt = st.text_area("English Prompt:", height=100, placeholder="A dog running in the snow...")
-        if st.button("Generate Video 🚀", key="text_btn"):
+        st.markdown("**Model:** `Zeroscope v2` (Best for Free Tier)")
+        prompt = st.text_area("Prompt (English only):", height=100, placeholder="A dog running on grass, cinematic, 4k")
+        
+        if st.button("Generate Video ⚡", key="text_btn"):
             if not prompt:
                 st.warning("Prompt likhein!")
             else:
-                with st.spinner("🎥 Video ban rahi hai..."):
-                    video_data = generate_video(MODEL_TEXT, prompt)
+                with st.spinner("🎥 Video ban rahi hai (Zeroscope)..."):
+                    # Zeroscope needs specific resolution prompt sometimes
+                    full_prompt = prompt + ", 576x320, 24fps, high quality"
+                    video_data = generate_video(MODEL_TEXT, full_prompt)
+                    
                     if video_data:
-                        st.success("✅ Success!")
+                        st.success("✅ Video Ban Gayi!")
                         st.video(video_data)
 
     # --- TAB 2: IMAGE ---
     with tab2:
-        file = st.file_uploader("Image Upload (JPG/PNG)", type=["jpg", "png"])
+        st.warning("⚠️ Note: Image-to-Video free tier par bohot mushkil se chalta hai.")
+        file = st.file_uploader("Image Upload", type=["jpg", "png"])
+        
         if file and st.button("Animate Image ✨", key="img_btn"):
             image = Image.open(file)
             st.image(image, caption="Input", use_column_width=True)
             
-            with st.spinner("⚡ Processing heavy model..."):
-                # Convert Image to Bytes
+            with st.spinner("⚡ Processing..."):
                 img_byte_arr = BytesIO()
                 image.save(img_byte_arr, format=image.format)
                 img_bytes = img_byte_arr.getvalue()
