@@ -20,7 +20,7 @@ st.markdown("""
 # --- SETUP CLIENT ---
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-# ✅ NEW MODEL: Zeroscope (Faster & Lighter for Free Tier)
+# Models
 MODEL_TEXT = "cerspense/zeroscope_v2_576w"
 MODEL_IMAGE = "stabilityai/stable-video-diffusion-img2vid-xt"
 
@@ -30,51 +30,51 @@ def generate_video(model_id, inputs, is_binary=False):
     # Retry Logic
     for attempt in range(3):
         try:
+            # ✅ FIX: 'model=' likhna zaroori hai (Keyword Argument)
             if is_binary:
-                response = client.post(model_id, data=inputs)
+                response = client.post(data=inputs, model=model_id)
             else:
-                response = client.post(model_id, json={"inputs": inputs})
+                response = client.post(json={"inputs": inputs}, model=model_id)
+            
             return response
             
         except Exception as e:
             error_msg = str(e)
             
-            # Agar Cold Start hai (Loading)
+            # Cold Start Handling
             if "503" in error_msg or "loading" in error_msg.lower():
                 wait_time = 25
                 st.warning(f"⚠️ Server Jaag raha hai (Warming up)... {wait_time}s wait. (Try {attempt+1}/3)")
                 time.sleep(wait_time)
                 continue
             
-            # 🚨 REAL ERROR DIKHAYENGE (Debugging ke liye)
+            # Error display
             st.error(f"🚫 Attempt {attempt+1} Failed. Reason: {error_msg}")
-            
-            # Thoda ruk kar retry
             time.sleep(5)
     
     return None
 
 def main():
-    st.title("🎬 AI Video Generator (Zeroscope Edition)")
+    st.title("🎬 AI Video Generator (Zeroscope)")
     
     if not HF_TOKEN:
         st.error("🚨 Token Missing! Koyeb settings check karein.")
         return
 
-    tab1, tab2 = st.tabs(["📝 Text-to-Video (Fast)", "🖼️ Image-to-Video (Heavy)"])
+    tab1, tab2 = st.tabs(["📝 Text-to-Video", "🖼️ Image-to-Video"])
 
-    # --- TAB 1: ZEROSCOPE TEXT ---
+    # --- TAB 1: TEXT ---
     with tab1:
-        st.markdown("**Model:** `Zeroscope v2` (Best for Free Tier)")
-        prompt = st.text_area("Prompt (English only):", height=100, placeholder="A dog running on grass, cinematic, 4k")
+        st.info("Best Prompt: 'A panda eating bamboo, high quality, 4k'")
+        prompt = st.text_area("Prompt (English only):", height=100)
         
         if st.button("Generate Video ⚡", key="text_btn"):
             if not prompt:
                 st.warning("Prompt likhein!")
             else:
                 with st.spinner("🎥 Video ban rahi hai (Zeroscope)..."):
-                    # Zeroscope needs specific resolution prompt sometimes
-                    full_prompt = prompt + ", 576x320, 24fps, high quality"
+                    # Prompt enhancement
+                    full_prompt = prompt + ", 576x320, 24fps, 4k, high quality"
                     video_data = generate_video(MODEL_TEXT, full_prompt)
                     
                     if video_data:
@@ -83,7 +83,7 @@ def main():
 
     # --- TAB 2: IMAGE ---
     with tab2:
-        st.warning("⚠️ Note: Image-to-Video free tier par bohot mushkil se chalta hai.")
+        st.warning("⚠️ Note: Image-to-Video free tier par heavy load ki wajah se fail ho sakta hai.")
         file = st.file_uploader("Image Upload", type=["jpg", "png"])
         
         if file and st.button("Animate Image ✨", key="img_btn"):
