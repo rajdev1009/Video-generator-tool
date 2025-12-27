@@ -1,124 +1,105 @@
 import streamlit as st
-import requests
 import os
 import time
 from io import BytesIO
 from PIL import Image
+from huggingface_hub import InferenceClient
 
-# --- PAGE CONFIGURATION (Mobile Friendly) ---
-st.set_page_config(
-    page_title="AI Video Generator Pro",
-    page_icon="🎬",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
+# --- PAGE CONFIGURATION ---
+st.set_page_config(page_title="AI Video Pro", page_icon="🎬", layout="centered")
 
-# --- CSS FOR MOBILE OPTIMIZATION ---
+# --- CSS STYLING ---
 st.markdown("""
     <style>
     .stApp { max-width: 100%; padding: 20px; }
     .stVideo { width: 100% !important; border-radius: 10px; }
     .stButton>button { width: 100%; border-radius: 20px; }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
     </style>
     """, unsafe_allow_html=True)
 
-# --- API CONFIGURATION ---
+# --- SETUP CLIENT ---
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-# ✅ UPDATED URLs (Fixed Error 410)
-API_URL_TEXT = "https://router.huggingface.co/models/damo-vilab/text-to-video-ms-1.7b"
-API_URL_IMAGE = "https://router.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt"
+# Models IDs
+MODEL_TEXT = "damo-vilab/text-to-video-ms-1.7b"
+MODEL_IMAGE = "stabilityai/stable-video-diffusion-img2vid-xt"
 
-# --- CORE FUNCTION: GENERATE VIDEO WITH RETRY LOGIC ---
-def query_huggingface_api(api_url, payload, is_binary=False):
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    
-    max_retries = 3
-    for attempt in range(max_retries):
+# Initialize Client (Yeh automatic connection sambhalega)
+client = InferenceClient(token=HF_TOKEN)
+
+def generate_video(model_id, inputs, is_binary=False):
+    # Retry Logic (3 times)
+    for attempt in range(3):
         try:
             if is_binary:
-                response = requests.post(api_url, headers=headers, data=payload)
+                # Image-to-Video
+                response = client.post(model_id, data=inputs)
             else:
-                response = requests.post(api_url, headers=headers, json=payload)
+                # Text-to-Video
+                response = client.post(model_id, json={"inputs": inputs})
             
-            # Success
-            if response.status_code == 200:
-                return response.content
+            return response
             
-            # Model Loading (Cold Start)
-            elif response.status_code == 503:
-                error_data = response.json()
-                wait_time = error_data.get("estimated_time", 20)
-                st.warning(f"⚠️ Model load ho raha hai. {int(wait_time)} seconds wait kar rahe hain... (Attempt {attempt+1}/{max_retries})")
-                time.sleep(wait_time)
-                continue 
+        except Exception as e:
+            error_msg = str(e)
             
-            # Handle Redirects or 410 Errors specifically
-            elif response.status_code == 410:
-                 st.error("🚨 API Endpoint changed. Please contact developer to update URLs.")
-                 return None
-
-            else:
-                st.error(f"Server Error {response.status_code}: {response.text}")
+            # Agar Model Load ho raha hai (503)
+            if "503" in error_msg or "loading" in error_msg.lower():
+                st.warning(f"⚠️ Model load ho raha hai (Cold Start)... {20}s wait. (Try {attempt+1}/3)")
+                time.sleep(20)
+                continue
+            
+            # Agar koi aur error hai
+            elif "404" in error_msg:
+                st.error("❌ Error 404: Model temporarily down or moved by Hugging Face.")
                 return None
-                
-        except requests.exceptions.RequestException as e:
-            st.warning(f"🌐 Network glitch, retrying... (Attempt {attempt+1}/{max_retries})")
-            time.sleep(2)
-            
-    st.error("❌ Server bahut busy hai. Please 2 minute baad try karein.")
+            else:
+                # Chhota error dikhayenge, technical detail chhupa denge
+                st.warning(f"🔄 Server busy, retrying... ({attempt+1}/3)")
+                time.sleep(5)
+    
+    st.error("❌ Server abhi response nahi de raha. Please 5 minute baad try karein.")
     return None
 
-# --- MAIN APP UI ---
 def main():
-    st.title("🎬 Ultimate AI Video Studio")
+    st.title("🎬 AI Video Generator (Official API)")
     
     if not HF_TOKEN:
-        st.error("🚨 Configuration Error: HF_TOKEN missing in Koyeb settings.")
+        st.error("🚨 HF_TOKEN environment variable missing hai!")
         return
 
     tab1, tab2 = st.tabs(["📝 Text-to-Video", "🖼️ Image-to-Video"])
 
-    # --- TAB 1: TEXT TO VIDEO ---
+    # --- TAB 1: TEXT ---
     with tab1:
-        st.header("Text se Video Banayein")
-        # Note: English prompt is better for this model
-        prompt = st.text_area("Video description (English mein likhein):", height=100, placeholder="An elephant walking in a forest...", key="text_prompt")
-
-        if st.button("Generate from Text 🚀", key="btn_text"):
+        prompt = st.text_area("English Prompt:", height=100, placeholder="A dog running in the snow...")
+        if st.button("Generate Video 🚀", key="text_btn"):
             if not prompt:
-                st.warning("Please prompt likhein!")
+                st.warning("Prompt likhein!")
             else:
-                with st.spinner("🎥 Video generate ho rahi hai..."):
-                    video_bytes = query_huggingface_api(API_URL_TEXT, {"inputs": prompt})
-                    if video_bytes:
-                        st.success("✅ Video Ready!")
-                        st.video(video_bytes)
+                with st.spinner("🎥 Video ban rahi hai..."):
+                    video_data = generate_video(MODEL_TEXT, prompt)
+                    if video_data:
+                        st.success("✅ Success!")
+                        st.video(video_data)
 
-    # --- TAB 2: IMAGE TO VIDEO ---
+    # --- TAB 2: IMAGE ---
     with tab2:
-        st.header("Photo ko Zinda Karein")
-        st.info("ℹ️ Tip: Clear photo use karein.")
-        
-        uploaded_file = st.file_uploader("Image upload karein (JPG/PNG)", type=["jpg", "jpeg", "png"])
-
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded Image", use_column_width=True)
+        file = st.file_uploader("Image Upload (JPG/PNG)", type=["jpg", "png"])
+        if file and st.button("Animate Image ✨", key="img_btn"):
+            image = Image.open(file)
+            st.image(image, caption="Input", use_column_width=True)
             
-            if st.button("Animate This Image ✨", key="btn_image"):
-                with st.spinner("⚡ Photo process ho rahi hai..."):
-                    img_byte_arr = BytesIO()
-                    image.save(img_byte_arr, format=image.format)
-                    img_bytes = img_byte_arr.getvalue()
-                    
-                    video_bytes = query_huggingface_api(API_URL_IMAGE, img_bytes, is_binary=True)
-                    
-                    if video_bytes:
-                        st.success("✅ Image Animated Successfully!")
-                        st.video(video_bytes)
+            with st.spinner("⚡ Processing heavy model..."):
+                # Convert Image to Bytes
+                img_byte_arr = BytesIO()
+                image.save(img_byte_arr, format=image.format)
+                img_bytes = img_byte_arr.getvalue()
+                
+                video_data = generate_video(MODEL_IMAGE, img_bytes, is_binary=True)
+                if video_data:
+                    st.success("✅ Animated!")
+                    st.video(video_data)
 
 if __name__ == "__main__":
     main()
