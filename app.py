@@ -1,116 +1,93 @@
 import streamlit as st
-import requests
 import os
 import time
 from io import BytesIO
 from PIL import Image
+from huggingface_hub import InferenceClient
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="AI Video Studio (Classic)", page_icon="🎬", layout="centered")
+st.set_page_config(page_title="AI Video Final", page_icon="🎬", layout="centered")
 
-# --- CSS STYLING ---
-st.markdown("""
-    <style>
-    .stApp { max-width: 100%; padding: 20px; }
-    .stButton>button { width: 100%; border-radius: 20px; background-color: #2e86de; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- SETUP ---
+# --- SETUP CLIENT ---
 HF_TOKEN = os.environ.get("HF_TOKEN")
-BASE_URL = "https://api-inference.huggingface.co/models/"
 
-# ✅ SOLUTION: USE LIGHTWEIGHT CLASSIC MODELS
-# Step 1: Image (Old but Reliable)
-MODEL_TEXT_TO_IMAGE = "runwayml/stable-diffusion-v1-5"
-# Step 2: Video (Only SVD is left, we try best effort)
-MODEL_IMAGE_TO_VIDEO = "stabilityai/stable-video-diffusion-img2vid-xt"
+# ✅ NEW MODEL ID (Ali-Vilab is the new name for Damo)
+MODEL_VIDEO = "ali-vilab/text-to-video-ms-1.7b"
+MODEL_IMAGE = "stabilityai/stable-diffusion-xl-base-1.0"
 
-def query_api(model_id, payload, is_binary=False):
-    # Direct URL approach
-    api_url = f"{BASE_URL}{model_id}"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    
+client = InferenceClient(token=HF_TOKEN)
+
+def generate_content(model_id, prompt, is_image=False):
     for attempt in range(3):
         try:
-            if is_binary:
-                response = requests.post(api_url, headers=headers, data=payload)
+            # ✅ CORRECT SYNTAX (Keyword arguments only)
+            if is_image:
+                # Text-to-Image request
+                image = client.text_to_image(prompt, model=model_id)
+                return image
             else:
-                response = requests.post(api_url, headers=headers, json=payload)
+                # Text-to-Video request
+                response = client.post(
+                    json={"inputs": prompt}, 
+                    model=model_id
+                )
+                return response
             
-            # SUCCESS
-            if response.status_code == 200:
-                return response.content
+        except Exception as e:
+            error_msg = str(e)
             
-            # DEBUGGING: Print exact error if failed
-            error_details = response.text
-            
-            # Cold Start
-            if response.status_code == 503:
-                st.toast(f"⚠️ Model Loading... ({attempt+1}/3)")
+            # Cold Start (503)
+            if "503" in error_msg or "loading" in error_msg.lower():
+                st.toast(f"❄️ Model warming up... ({attempt+1}/3)")
                 time.sleep(20)
                 continue
             
-            # Agar Free Tier Error hai
-            if "Model not found" in error_details or response.status_code == 404:
-                 st.error(f"❌ '{model_id}' Free Tier par available nahi hai.")
-                 return None
-
-            # Retry
-            time.sleep(3)
-
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
-            time.sleep(2)
+            # 410 Gone / 404 Not Found
+            if "410" in error_msg or "404" in error_msg:
+                st.error(f"❌ Error: Model '{model_id}' temporary down hai.")
+                return None
+                
+            st.warning(f"⚠️ Retry {attempt+1}...")
+            time.sleep(5)
             
-    st.error(f"❌ Failed. Server Code: {response.status_code}")
+    st.error("❌ Server busy. Try again later.")
     return None
 
 def main():
-    st.title("🎬 AI Video Studio (Lite Version)")
-    st.markdown("Using **Stable Diffusion v1.5** (Most reliable free model).")
+    st.title("🎬 AI Video Generator (Updated)")
     
     if not HF_TOKEN:
-        st.error("🚨 Token Missing!")
+        st.error("🚨 HF_TOKEN missing!")
         return
 
-    tab1, tab2 = st.tabs(["1️⃣ Generate Image", "2️⃣ Animate Image"])
+    tab1, tab2 = st.tabs(["🎥 Text-to-Video", "🖼️ Text-to-Image"])
 
-    # --- TAB 1: TEXT TO IMAGE (v1.5) ---
+    # --- TAB 1: VIDEO (Updated Model) ---
     with tab1:
-        prompt = st.text_area("Image Prompt:", placeholder="A cyberpunk cat neon city")
+        st.subheader("Generate Video")
+        prompt_video = st.text_area("Video Prompt (English):", height=100, placeholder="An astronaut riding a horse in space")
         
-        if st.button("Generate Image 📸", key="gen_btn"):
-            if not prompt:
-                st.warning("Prompt likhein!")
+        if st.button("Generate Video 🚀", key="vid_btn"):
+            if not prompt_video:
+                st.warning("Prompt to likho!")
             else:
-                with st.spinner("🎨 Creating Image (Classic v1.5)..."):
-                    image_bytes = query_api(MODEL_TEXT_TO_IMAGE, {"inputs": prompt})
-                    
-                    if image_bytes:
-                        st.success("✅ Image Ready!")
-                        st.image(image_bytes, caption="Generated Image", use_column_width=True)
-                        st.download_button("Download Image 📥", image_bytes, "image.png", "image/png")
+                with st.spinner("🎥 Video render ho rahi hai (Ali-Vilab Model)..."):
+                    video_bytes = generate_content(MODEL_VIDEO, prompt_video, is_image=False)
+                    if video_bytes:
+                        st.success("✅ Video Success!")
+                        st.video(video_bytes)
 
-    # --- TAB 2: IMAGE TO VIDEO ---
+    # --- TAB 2: IMAGE (Backup) ---
     with tab2:
-        st.info("Upload the image you just created.")
-        uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png"])
+        st.subheader("Generate Image (Fast)")
+        prompt_img = st.text_area("Image Prompt:", height=100, placeholder="Cyberpunk city")
         
-        if uploaded_file and st.button("Animate Video 🎥", key="vid_btn"):
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Input", width=200)
-            
-            with st.spinner("⚡ Animating (May take 2-3 mins)..."):
-                img_byte_arr = BytesIO()
-                image.save(img_byte_arr, format=image.format)
-                img_bytes = img_byte_arr.getvalue()
-                
-                video_bytes = query_api(MODEL_IMAGE_TO_VIDEO, img_bytes, is_binary=True)
-                
-                if video_bytes:
-                    st.success("✅ Video Created!")
-                    st.video(video_bytes)
+        if st.button("Generate Image 📸", key="img_btn"):
+            with st.spinner("🎨 Painting..."):
+                image = generate_content(MODEL_IMAGE, prompt_img, is_image=True)
+                if image:
+                    st.success("✅ Image Created!")
+                    st.image(image, use_column_width=True)
 
 if __name__ == "__main__":
     main()
